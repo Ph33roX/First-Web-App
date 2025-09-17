@@ -37,7 +37,7 @@ No external API keys are required for Yahoo Finance.
 
 ### 3. Database setup
 
-Run the schema against your database using Drizzle Kit:
+Run the schema against your database using Drizzle Kit (the `db:push` script wraps `drizzle-kit push`):
 
 ```bash
 npm run db:push
