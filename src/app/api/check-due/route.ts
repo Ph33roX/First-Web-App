@@ -4,6 +4,10 @@ import { startOfDay, subMilliseconds } from "date-fns";
 import { bets, db } from "@/lib/db";
 import { BetNotMaturedError, settleBet } from "@/lib/services/settle-bet";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function POST() {
   const today = startOfDay(new Date());
   const endOfYesterday = subMilliseconds(today, 1);
