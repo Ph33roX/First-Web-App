@@ -4,6 +4,10 @@ import { bets, db } from "@/lib/db";
 import { checkBetSchema } from "@/lib/validation";
 import { BetNotMaturedError, settleBet } from "@/lib/services/settle-bet";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
