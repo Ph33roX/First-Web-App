@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, lt } from "drizzle-orm";
 import { startOfDay, subMilliseconds } from "date-fns";
 import { bets } from "@/lib/db";
-import { db } from "@/lib/db/client";
+import { getDb } from "@/lib/db/client";
 import { BetNotMaturedError, settleBet } from "@/lib/services/settle-bet";
 
 export const runtime = "nodejs";
@@ -14,6 +14,7 @@ export async function POST() {
   const endOfYesterday = subMilliseconds(today, 1);
 
   try {
+    const db = getDb();
     const dueBets = await db
       .select()
       .from(bets)

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { betFormSchema, getBetsQuerySchema } from "@/lib/validation";
 import { bets } from "@/lib/db";
-import { db } from "@/lib/db/client";
+import { getDb } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +12,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const data = betFormSchema.parse(body);
+    const db = getDb();
 
     const [inserted] = await db
       .insert(bets)
@@ -43,6 +44,7 @@ export async function GET(req: NextRequest) {
       limit: searchParams.get("limit") ?? undefined,
       page: searchParams.get("page") ?? undefined
     });
+    const db = getDb();
 
     const offset = (query.page - 1) * query.limit;
     const filters = query.status ? [eq(bets.status, query.status)] : [];
