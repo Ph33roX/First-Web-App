@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { betFormSchema, getBetsQuerySchema } from "@/lib/validation";
-import { bets, db } from "@/lib/db";
+import { bets } from "@/lib/db";
+import { db } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
