@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
+import TickerAutocomplete, { SelectedTicker } from "@/components/TickerAutocomplete";
 import { formatPercent } from "@/lib/utils";
 import { betFormClientSchema, type BetFormClientInput } from "@/lib/validation";
 
@@ -58,6 +59,8 @@ export default function DashboardPage() {
   const [completedBets, setCompletedBets] = useState<ApiBet[]>([]);
   const [loading, setLoading] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [tickerADetails, setTickerADetails] = useState<SelectedTicker | null>(null);
+  const [tickerBDetails, setTickerBDetails] = useState<SelectedTicker | null>(null);
 
   const defaults = useMemo(() => getDefaultDates(), []);
 
@@ -71,6 +74,14 @@ export default function DashboardPage() {
       ...defaults
     }
   });
+
+  const tickerAValue = form.watch("tickerA");
+  const tickerBValue = form.watch("tickerB");
+
+  useEffect(() => {
+    form.register("tickerA");
+    form.register("tickerB");
+  }, [form]);
 
   const refreshBets = useCallback(async () => {
     setLoading(true);
@@ -139,6 +150,8 @@ export default function DashboardPage() {
         tickerB: "",
         ...resetDefaults
       });
+      setTickerADetails(null);
+      setTickerBDetails(null);
       refreshBets();
     } catch (error) {
       console.error(error);
@@ -321,14 +334,58 @@ export default function DashboardPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="tickerA">Ticker A</Label>
-                    <Input id="tickerA" {...form.register("tickerA")} placeholder="AAPL" />
+                    <TickerAutocomplete
+                      id="tickerA"
+                      value={tickerAValue}
+                      onChange={(v) => {
+                        form.setValue("tickerA", v, { shouldDirty: true, shouldValidate: true });
+                        setTickerADetails(null);
+                      }}
+                      onSelect={(t) => {
+                        form.setValue("tickerA", t.symbol, { shouldDirty: true, shouldValidate: true });
+                        setTickerADetails(t);
+                      }}
+                      placeholder="AAPL"
+                    />
+                    {tickerADetails?.name && (
+                      <div className="mt-2 text-sm">
+                        <div className="font-medium">
+                          {tickerADetails.symbol} — {tickerADetails.name}
+                        </div>
+                        {tickerADetails.description && (
+                          <p className="mt-1 text-muted-foreground">{tickerADetails.description}</p>
+                        )}
+                      </div>
+                    )}
                     {form.formState.errors.tickerA && (
                       <p className="text-sm text-destructive">{form.formState.errors.tickerA.message}</p>
                     )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="tickerB">Ticker B</Label>
-                    <Input id="tickerB" {...form.register("tickerB")} placeholder="MSFT" />
+                    <TickerAutocomplete
+                      id="tickerB"
+                      value={tickerBValue}
+                      onChange={(v) => {
+                        form.setValue("tickerB", v, { shouldDirty: true, shouldValidate: true });
+                        setTickerBDetails(null);
+                      }}
+                      onSelect={(t) => {
+                        form.setValue("tickerB", t.symbol, { shouldDirty: true, shouldValidate: true });
+                        setTickerBDetails(t);
+                      }}
+                      placeholder="MSFT"
+                    />
+                    {tickerBDetails?.name && (
+                      <div className="mt-2 text-sm">
+                        <div className="font-medium">
+                          {tickerBDetails.symbol} — {tickerBDetails.name}
+                        </div>
+                        {tickerBDetails.description && (
+                          <p className="mt-1 text-muted-foreground">{tickerBDetails.description}</p>
+                        )}
+                      </div>
+                    )}
                     {form.formState.errors.tickerB && (
                       <p className="text-sm text-destructive">{form.formState.errors.tickerB.message}</p>
                     )}
