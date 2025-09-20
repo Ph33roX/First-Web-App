@@ -1,6 +1,7 @@
 import { isAfter, startOfDay } from "date-fns";
 import { eq } from "drizzle-orm";
-import { bets, db, type Bet, type BetResult } from "@/lib/db";
+import { bets, type Bet, type BetResult } from "@/lib/db";
+import { getDb } from "@/lib/db/client";
 import { calculateReturn, resolveTradingWindow } from "@/lib/finance";
 
 export class BetNotMaturedError extends Error {
@@ -40,6 +41,7 @@ export async function computeBetResult(bet: Bet): Promise<BetResult> {
 
 export async function settleBet(bet: Bet) {
   const result = await computeBetResult(bet);
+  const db = getDb();
   const [updated] = await db
     .update(bets)
     .set({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { bets } from "@/lib/db";
-import { db } from "@/lib/db/client";
+import { getDb } from "@/lib/db/client";
 import { checkBetSchema } from "@/lib/validation";
 import { BetNotMaturedError, settleBet } from "@/lib/services/settle-bet";
 
@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { id } = checkBetSchema.parse(body);
+    const db = getDb();
 
     const bet = await db.query.bets.findFirst({ where: eq(bets.id, id) });
 
