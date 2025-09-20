@@ -16,23 +16,45 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import TickerAutocomplete, { SelectedTicker } from "@/components/TickerAutocomplete";
 import { formatPercent } from "@/lib/utils";
-import { betFormClientSchema, type BetFormClientInput } from "@/lib/validation";
+import { createBetFormSchema, type CreateBetInput } from "@/lib/validation";
+
+type ApiQuoteSnapshot = {
+  date: string;
+  close: number;
+  adjClose: number;
+};
+
+type ApiLegResult = {
+  ticker: string;
+  start: ApiQuoteSnapshot;
+  end: ApiQuoteSnapshot;
+  raw: number;
+  rounded: number;
+};
+
+type ApiBetResult = {
+  a: ApiLegResult;
+  b: ApiLegResult;
+  winner: "A" | "B" | "Tie";
+};
+
+type ApiBetStatus = "OPEN" | "SETTLED" | "INVALID";
 
 type ApiBet = {
   id: string;
   createdAt: string;
+  updatedAt: string;
+  settledAt: string | null;
+  settlementTxId: string | null;
+  settlementError: string | null;
   bettorA: string;
   bettorB: string;
   tickerA: string;
   tickerB: string;
   startDate: string;
   endDate: string;
-  status: "open" | "completed";
-  result: null | {
-    aReturn: number;
-    bReturn: number;
-    winner: "A" | "B" | "Tie";
-  };
+  status: ApiBetStatus;
+  result: ApiBetResult | null;
 };
 
 const PAGE_LIMIT = 20;
@@ -53,10 +75,30 @@ const getDefaultDates = () => {
   };
 };
 
+const resolveErrorMessage = (data: any, fallback: string) => {
+  if (!data) return fallback;
+  if (typeof data.error === "string") return data.error;
+  if (data.error?.formErrors?.length) return data.error.formErrors[0] as string;
+  if (data.error?.fieldErrors) {
+    const firstFieldError = Object.values(data.error.fieldErrors).flat()[0];
+    if (typeof firstFieldError === "string") {
+      return firstFieldError;
+    }
+  }
+  return fallback;
+};
+
+const sortClosedBets = (bets: ApiBet[]) =>
+  [...bets].sort((a, b) => {
+    const left = new Date(a.settledAt ?? a.updatedAt ?? a.createdAt).getTime();
+    const right = new Date(b.settledAt ?? b.updatedAt ?? b.createdAt).getTime();
+    return right - left;
+  });
+
 export default function DashboardPage() {
   const { toast } = useToast();
   const [ongoingBets, setOngoingBets] = useState<ApiBet[]>([]);
-  const [completedBets, setCompletedBets] = useState<ApiBet[]>([]);
+  const [closedBets, setClosedBets] = useState<ApiBet[]>([]);
   const [loading, setLoading] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [tickerADetails, setTickerADetails] = useState<SelectedTicker | null>(null);
@@ -64,8 +106,10 @@ export default function DashboardPage() {
 
   const defaults = useMemo(() => getDefaultDates(), []);
 
-  const form = useForm<BetFormClientInput>({
-    resolver: zodResolver(betFormClientSchema),
+  const form = useForm<CreateBetInput>({
+    resolver: zodResolver(createBetFormSchema),
+    mode: "onChange",
+    reValidateMode: "onChange",
     defaultValues: {
       bettorA: "",
       bettorB: "",
@@ -86,28 +130,29 @@ export default function DashboardPage() {
   const refreshBets = useCallback(async () => {
     setLoading(true);
     try {
-      const [openResponse, completedResponse] = await Promise.all([
-        fetch(`/api/bets?status=open&limit=${PAGE_LIMIT}`),
-        fetch(`/api/bets?status=completed&limit=${PAGE_LIMIT}`)
+      const fetchJson = async <T,>(url: string) => {
+        const response = await fetch(url, { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(resolveErrorMessage(data, `Request failed for ${url}`));
+        }
+        return data as T;
+      };
+
+      const [openData, settledData, invalidData] = await Promise.all([
+        fetchJson<{ items: ApiBet[] }>(`/api/bets?status=OPEN&limit=${PAGE_LIMIT}`),
+        fetchJson<{ items: ApiBet[] }>(`/api/bets?status=SETTLED&limit=${PAGE_LIMIT}`),
+        fetchJson<{ items: ApiBet[] }>(`/api/bets?status=INVALID&limit=${PAGE_LIMIT}`)
       ]);
 
-      if (!openResponse.ok) {
-        const error = await openResponse.json().catch(() => ({}));
-        throw new Error(error?.error ?? "Failed to load open bets");
-      }
-      if (!completedResponse.ok) {
-        const error = await completedResponse.json().catch(() => ({}));
-        throw new Error(error?.error ?? "Failed to load completed bets");
-      }
-
-      const openData = (await openResponse.json()) as { items: ApiBet[] };
-      const completedData = (await completedResponse.json()) as { items: ApiBet[] };
-
       setOngoingBets(openData.items);
-      setCompletedBets(completedData.items);
+      setClosedBets(sortClosedBets([...settledData.items, ...invalidData.items]));
     } catch (error) {
       console.error(error);
-      toast({ title: "Unable to load bets", description: error instanceof Error ? error.message : "" });
+      toast({
+        title: "Unable to load bets",
+        description: error instanceof Error ? error.message : "Unknown error"
+      });
     } finally {
       setLoading(false);
     }
@@ -118,30 +163,27 @@ export default function DashboardPage() {
   }, [refreshBets]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    const payload = {
-      ...values,
-      tickerA: values.tickerA.toUpperCase(),
-      tickerB: values.tickerB.toUpperCase()
-    };
-
     try {
       const response = await fetch("/api/bets", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(payload)
+        cache: "no-store",
+        body: JSON.stringify(values)
       });
 
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error?.error ?? "Failed to create bet");
+        throw new Error(resolveErrorMessage(data, "Failed to create bet"));
       }
 
       toast({
         title: "Bet created",
-        description: `Tracking ${payload.bettorA} vs ${payload.bettorB}`
+        description: `Tracking ${values.bettorA} vs ${values.bettorB}`
       });
+
       const resetDefaults = getDefaultDates();
       form.reset({
         bettorA: "",
@@ -157,7 +199,7 @@ export default function DashboardPage() {
       console.error(error);
       toast({
         title: "Unable to create bet",
-        description: error instanceof Error ? error.message : ""
+        description: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
@@ -171,25 +213,48 @@ export default function DashboardPage() {
           headers: {
             "Content-Type": "application/json"
           },
+          cache: "no-store",
           body: JSON.stringify({ id })
         });
 
         const data = await response.json().catch(() => ({}));
 
-        if (!response.ok) {
-          throw new Error(data?.error ?? "Unable to check bet");
+        if (response.status === 202) {
+          toast({
+            title: "Settlement pending",
+            description: data.reason ?? "Waiting for the next available market close."
+          });
+          refreshBets();
+          return;
         }
 
-        toast({
-          title: "Bet settled",
-          description: `Winner: ${data.result?.winner ?? "Tie"}`
-        });
+        if (!response.ok) {
+          throw new Error(resolveErrorMessage(data, "Unable to settle bet"));
+        }
+
+        if (data.status === "INVALID") {
+          toast({
+            title: "Bet marked invalid",
+            description: data.settlementError ?? "Missing market data for this bet."
+          });
+        } else {
+          const winnerLabel = data.result?.winner === "Tie"
+            ? "Tie"
+            : data.result?.winner === "A"
+              ? data.bettorA
+              : data.bettorB;
+          toast({
+            title: "Bet settled",
+            description: `Winner: ${winnerLabel ?? "Tie"}`
+          });
+        }
+
         refreshBets();
       } catch (error) {
         console.error(error);
         toast({
           title: "Unable to settle bet",
-          description: error instanceof Error ? error.message : ""
+          description: error instanceof Error ? error.message : "Unknown error"
         });
       } finally {
         setCheckingId(null);
@@ -231,13 +296,18 @@ export default function DashboardPage() {
               <TableCell>{formatDate(bet.startDate)}</TableCell>
               <TableCell>{formatDate(bet.endDate)}</TableCell>
               <TableCell className="text-right">
-                <Button
-                  size="sm"
-                  onClick={() => handleCheck(bet.id)}
-                  disabled={checkingId === bet.id}
-                >
-                  {checkingId === bet.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Check now"}
-                </Button>
+                <div className="flex flex-col items-end gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleCheck(bet.id)}
+                    disabled={checkingId === bet.id}
+                  >
+                    {checkingId === bet.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Check now"}
+                  </Button>
+                  {bet.settlementError && (
+                    <p className="max-w-xs text-xs text-muted-foreground">{bet.settlementError}</p>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -246,13 +316,13 @@ export default function DashboardPage() {
     );
   }, [checkingId, handleCheck, loading, ongoingBets]);
 
-  const completedContent = useMemo(() => {
-    if (loading && completedBets.length === 0) {
-      return <p className="text-sm text-muted-foreground">Loading completed bets...</p>;
+  const closedContent = useMemo(() => {
+    if (loading && closedBets.length === 0) {
+      return <p className="text-sm text-muted-foreground">Loading closed bets...</p>;
     }
 
-    if (completedBets.length === 0) {
-      return <p className="text-sm text-muted-foreground">No completed bets yet.</p>;
+    if (closedBets.length === 0) {
+      return <p className="text-sm text-muted-foreground">No closed bets yet.</p>;
     }
 
     return (
@@ -261,38 +331,59 @@ export default function DashboardPage() {
           <TableRow>
             <TableHead>Bettors</TableHead>
             <TableHead>Tickers</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead>Winner</TableHead>
             <TableHead>A Return</TableHead>
             <TableHead>B Return</TableHead>
+            <TableHead>Notes</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {completedBets.map((bet) => (
-            <TableRow key={bet.id}>
-              <TableCell className="font-medium">{bet.bettorA} vs {bet.bettorB}</TableCell>
-              <TableCell>
-                <div className="flex flex-col text-sm">
-                  <span>{bet.tickerA}</span>
-                  <span>{bet.tickerB}</span>
-                </div>
-              </TableCell>
-              <TableCell>
-                {bet.result ? (
-                  <Badge variant={bet.result.winner === "Tie" ? "secondary" : "default"}>
-                    {bet.result.winner === "Tie" ? "Tie" : bet.result.winner === "A" ? bet.bettorA : bet.bettorB}
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary">Pending</Badge>
-                )}
-              </TableCell>
-              <TableCell>{bet.result ? formatPercent(bet.result.aReturn) : "--"}</TableCell>
-              <TableCell>{bet.result ? formatPercent(bet.result.bReturn) : "--"}</TableCell>
-            </TableRow>
-          ))}
+          {closedBets.map((bet) => {
+            const isInvalid = bet.status === "INVALID";
+            const result = bet.result;
+            const winnerLabel = result
+              ? result.winner === "Tie"
+                ? "Tie"
+                : result.winner === "A"
+                  ? bet.bettorA
+                  : bet.bettorB
+              : "--";
+
+            return (
+              <TableRow key={bet.id}>
+                <TableCell className="font-medium">{bet.bettorA} vs {bet.bettorB}</TableCell>
+                <TableCell>
+                  <div className="flex flex-col text-sm">
+                    <span>{bet.tickerA}</span>
+                    <span>{bet.tickerB}</span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={isInvalid ? "destructive" : "default"}>{isInvalid ? "Invalid" : "Settled"}</Badge>
+                </TableCell>
+                <TableCell>
+                  {result ? (
+                    <Badge variant={result.winner === "Tie" ? "secondary" : "default"}>{winnerLabel}</Badge>
+                  ) : (
+                    <Badge variant="secondary">--</Badge>
+                  )}
+                </TableCell>
+                <TableCell>{formatPercent(result?.a.rounded)}</TableCell>
+                <TableCell>{formatPercent(result?.b.rounded)}</TableCell>
+                <TableCell className="max-w-sm text-sm text-muted-foreground">
+                  {bet.settlementError ?? ""}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     );
-  }, [completedBets, loading]);
+  }, [closedBets, loading]);
+
+  const isSubmitting = form.formState.isSubmitting;
+  const isSubmitDisabled = !form.formState.isValid || isSubmitting;
 
   return (
     <div className="space-y-6">
@@ -302,10 +393,10 @@ export default function DashboardPage() {
       </div>
 
       <Tabs defaultValue="new">
-        <TabsList>
+        <TabsList aria-label="Bet management sections">
           <TabsTrigger value="new">New Bet</TabsTrigger>
           <TabsTrigger value="ongoing">Ongoing</TabsTrigger>
-          <TabsTrigger value="completed">Completed</TabsTrigger>
+          <TabsTrigger value="completed">Closed</TabsTrigger>
         </TabsList>
         <TabsContent value="new">
           <Card>
@@ -408,14 +499,17 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <Button type="submit">Create bet</Button>
+                  <Button type="submit" disabled={isSubmitDisabled}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    <span>Create bet</span>
+                  </Button>
                 </div>
               </form>
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="ongoing">{ongoingContent}</TabsContent>
-        <TabsContent value="completed">{completedContent}</TabsContent>
+        <TabsContent value="completed">{closedContent}</TabsContent>
       </Tabs>
     </div>
   );

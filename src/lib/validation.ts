@@ -1,65 +1,113 @@
+import { differenceInCalendarDays, isValid, parseISO, formatISO } from "date-fns";
 import { z } from "zod";
 
-export const tickerSchema = z
+import { normalizeToYahoo } from "./tickers";
+
+const MAX_RANGE_DAYS = 366;
+
+const nameSchema = (field: string) =>
+  z
+    .string({ required_error: `${field} is required` })
+    .trim()
+    .min(1, `${field} is required`)
+    .max(80, `${field} must be 80 characters or fewer`);
+
+const tickerSchema = z
   .string({ required_error: "Ticker is required" })
   .trim()
   .min(1, "Ticker is required")
-  .regex(/^[A-Za-z]+$/, "Only letters A-Z are allowed")
-  .transform((value) => value.toUpperCase());
+  .max(16, "Ticker must be 16 characters or fewer")
+  .transform((value, ctx) => {
+    try {
+      return normalizeToYahoo(value);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error instanceof Error ? error.message : "Invalid ticker symbol"
+      });
+      return z.NEVER;
+    }
+  });
 
-export const betFormSchema = z
+const isoDateSchema = (field: string) =>
+  z
+    .string({ required_error: `${field} is required` })
+    .trim()
+    .min(1, `${field} is required`)
+    .transform((value, ctx) => {
+      const parsed = parseISO(value);
+      if (!isValid(parsed)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Invalid ${field.toLowerCase()}` });
+        return z.NEVER;
+      }
+      return formatISO(parsed, { representation: "date" });
+    });
+
+const baseCreateBetSchema = z
   .object({
-    bettorA: z.string({ required_error: "Bettor A is required" }).trim().min(1, "Bettor A is required"),
-    bettorB: z.string({ required_error: "Bettor B is required" }).trim().min(1, "Bettor B is required"),
+    bettorA: nameSchema("Bettor A"),
+    bettorB: nameSchema("Bettor B"),
     tickerA: tickerSchema,
     tickerB: tickerSchema,
-    startDate: z.coerce.date({ required_error: "Start date is required" }),
-    endDate: z.coerce.date({ required_error: "End date is required" })
+    startDate: isoDateSchema("Start date"),
+    endDate: isoDateSchema("End date")
   })
-  .refine((data) => data.endDate >= data.startDate, {
-    message: "End date must be on or after start date",
-    path: ["endDate"]
-  });
-
-export type BetFormInput = z.infer<typeof betFormSchema>;
-
-export const betFormClientSchema = z
-  .object({
-    bettorA: z.string({ required_error: "Bettor A is required" }).trim().min(1, "Bettor A is required"),
-    bettorB: z.string({ required_error: "Bettor B is required" }).trim().min(1, "Bettor B is required"),
-    tickerA: z
-      .string({ required_error: "Ticker A is required" })
-      .trim()
-      .min(1, "Ticker A is required")
-      .regex(/^[A-Za-z]+$/, "Only letters A-Z are allowed"),
-    tickerB: z
-      .string({ required_error: "Ticker B is required" })
-      .trim()
-      .min(1, "Ticker B is required")
-      .regex(/^[A-Za-z]+$/, "Only letters A-Z are allowed"),
-    startDate: z.string({ required_error: "Start date is required" }).min(1, "Start date is required"),
-    endDate: z.string({ required_error: "End date is required" }).min(1, "End date is required")
-  })
-  .refine((data) => {
-    const start = new Date(data.startDate);
-    const end = new Date(data.endDate);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      return false;
+  .superRefine((data, ctx) => {
+    if (data.tickerA === data.tickerB) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tickers must be different",
+        path: ["tickerB"]
+      });
     }
-    return end >= start;
-  }, {
-    message: "End date must be on or after start date",
-    path: ["endDate"]
+
+    let start: Date | null = null;
+    let end: Date | null = null;
+    try {
+      start = parseISO(data.startDate);
+      end = parseISO(data.endDate);
+    } catch {
+      return;
+    }
+
+    if (!isValid(start) || !isValid(end)) {
+      return;
+    }
+
+    const diff = differenceInCalendarDays(end, start);
+    if (diff <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "End date must be after start date",
+        path: ["endDate"]
+      });
+    }
+    if (diff > MAX_RANGE_DAYS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Date range cannot exceed ${MAX_RANGE_DAYS} days`,
+        path: ["endDate"]
+      });
+    }
   });
 
-export type BetFormClientInput = z.infer<typeof betFormClientSchema>;
+export const createBetSchema = baseCreateBetSchema;
+export const createBetFormSchema = baseCreateBetSchema;
+export type CreateBetInput = z.infer<typeof createBetSchema>;
 
 export const getBetsQuerySchema = z.object({
-  status: z.enum(["open", "completed"]).optional(),
+  status: z.enum(["OPEN", "SETTLED", "INVALID"]).optional(),
   limit: z.coerce.number().int().positive().max(50).default(10),
   page: z.coerce.number().int().positive().default(1)
 });
 
+export type GetBetsQuery = z.infer<typeof getBetsQuerySchema>;
+
 export const checkBetSchema = z.object({
   id: z.string().uuid()
+});
+
+export const checkDueQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(500).default(100),
+  cursor: z.string().trim().min(1).optional()
 });

@@ -1,13 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { ZodError } from "zod";
+
 import { bets } from "@/lib/db";
 import { db } from "@/lib/db/client";
-import { checkBetSchema } from "@/lib/validation";
 import { BetNotMaturedError, settleBet } from "@/lib/services/settle-bet";
+import { checkBetSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+function methodNotAllowed() {
+  return NextResponse.json(
+    { error: "Method Not Allowed" },
+    {
+      status: 405,
+      headers: {
+        Allow: "POST"
+      }
+    }
+  );
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,24 +34,47 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Bet not found" }, { status: 404 });
     }
 
-    if (bet.status === "completed") {
-      return NextResponse.json(bet);
+    if (bet.status !== "OPEN") {
+      return NextResponse.json(bet, { status: 200 });
     }
 
-    const updated = await settleBet(bet);
-
-    return NextResponse.json(updated);
+    try {
+      const result = await settleBet(bet);
+      if (result.status === "PENDING") {
+        return NextResponse.json(result, { status: 202 });
+      }
+      return NextResponse.json(result.bet, { status: 200 });
+    } catch (error) {
+      if (error instanceof BetNotMaturedError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
   } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: error.flatten() }, { status: 400 });
+    }
     console.error("Failed to check bet", error);
-    if (error instanceof Error && "issues" in error) {
-      return NextResponse.json({ error: (error as any).issues }, { status: 422 });
-    }
-    if (error instanceof BetNotMaturedError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
     return NextResponse.json({ error: "Unable to check bet" }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return methodNotAllowed();
+}
+
+export async function PUT() {
+  return methodNotAllowed();
+}
+
+export async function PATCH() {
+  return methodNotAllowed();
+}
+
+export async function DELETE() {
+  return methodNotAllowed();
+}
+
+export async function HEAD() {
+  return methodNotAllowed();
 }
