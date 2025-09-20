@@ -94,3 +94,8 @@ To automatically settle expired bets, trigger the `/api/check-due` endpoint via 
 - `npm run db:seed` – seed sample data.
 - `npm run db:studio` – open the Drizzle Studio UI.
 - `npm run db:generate` – generate SQL migrations from schema changes.
+
+## Troubleshooting
+
+- Database migrations rely on `DATABASE_URL`, while the runtime uses `POSTGRES_URL` (pooled) and `POSTGRES_URL_NON_POOLING`. If any of these variables are missing the server will throw an explicit error—double check your `.env` values when running locally.
+- All API routes that talk to Postgres execute in the Node.js runtime. If you encounter `fs`/`crypto` errors in production it typically means the route fell back to the Edge runtime; redeploy after ensuring the `runtime = 'nodejs'` exports are preserved.

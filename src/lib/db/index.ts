@@ -1,5 +1,6 @@
 import * as schema from "./schema";
 
-export { db } from "./client";
+export { db, pool } from "./client";
 export const { bets } = schema;
-export type { Bet, BetResult, NewBet } from "./schema";
+export { betStatusEnum } from "./schema";
+export type { Bet, BetLegResult, BetResult, NewBet, QuoteSnapshot } from "./schema";

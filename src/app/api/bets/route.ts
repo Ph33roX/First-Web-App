@@ -1,17 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { betFormSchema, getBetsQuerySchema } from "@/lib/validation";
+import { ZodError } from "zod";
+
 import { bets } from "@/lib/db";
 import { db } from "@/lib/db/client";
+import { createBetSchema, getBetsQuerySchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+function methodNotAllowed() {
+  return NextResponse.json(
+    { error: "Method Not Allowed" },
+    {
+      status: 405,
+      headers: {
+        Allow: "GET, POST"
+      }
+    }
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const data = betFormSchema.parse(body);
+    const data = createBetSchema.parse(body);
 
     const [inserted] = await db
       .insert(bets)
@@ -27,10 +41,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(inserted, { status: 201 });
   } catch (error) {
-    console.error("Failed to create bet", error);
-    if (error instanceof Error && "issues" in error) {
-      return NextResponse.json({ error: (error as any).issues }, { status: 422 });
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: error.flatten() }, { status: 400 });
     }
+    console.error("Failed to create bet", error);
     return NextResponse.json({ error: "Unable to create bet" }, { status: 500 });
   }
 }
@@ -70,10 +84,26 @@ export async function GET(req: NextRequest) {
       total: Number(count)
     });
   } catch (error) {
-    console.error("Failed to fetch bets", error);
-    if (error instanceof Error && "issues" in error) {
-      return NextResponse.json({ error: (error as any).issues }, { status: 400 });
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: error.flatten() }, { status: 400 });
     }
+    console.error("Failed to fetch bets", error);
     return NextResponse.json({ error: "Unable to fetch bets" }, { status: 500 });
   }
+}
+
+export async function PUT() {
+  return methodNotAllowed();
+}
+
+export async function PATCH() {
+  return methodNotAllowed();
+}
+
+export async function DELETE() {
+  return methodNotAllowed();
+}
+
+export async function HEAD() {
+  return methodNotAllowed();
 }

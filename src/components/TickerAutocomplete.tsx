@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 type Suggestion = {
   symbol: string;
@@ -32,6 +32,7 @@ export default function TickerAutocomplete({
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const listId = useId();
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -99,14 +100,20 @@ export default function TickerAutocomplete({
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => onChange(e.target.value.toUpperCase())}
         placeholder={placeholder}
         autoComplete="off"
         className="w-full rounded border px-3 py-2"
         onFocus={() => value && setOpen(true)}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        role="combobox"
+        aria-controls={open ? listId : undefined}
       />
       {open && items.length > 0 && (
         <ul
           role="listbox"
+          id={listId}
           className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded border bg-white shadow"
         >
           {items.map((s, idx) => {
@@ -115,6 +122,7 @@ export default function TickerAutocomplete({
               <li
                 key={`${s.symbol}-${idx}`}
                 role="option"
+                aria-selected="false"
                 tabIndex={0}
                 onClick={() => handlePick(s)}
                 onKeyDown={(e) => e.key === "Enter" && handlePick(s)}

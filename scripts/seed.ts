@@ -1,5 +1,8 @@
 import "dotenv/config";
-import { addDays } from "date-fns";
+import { randomUUID } from "crypto";
+
+import { addDays, formatISO } from "date-fns";
+
 import { db } from "@/lib/db";
 import { bets } from "@/lib/db/schema";
 
@@ -11,6 +14,12 @@ async function main() {
   const start = addDays(today, -10);
   const end = addDays(today, -3);
 
+  const quoteSnapshot = (price: number, daysAgo: number) => ({
+    date: formatISO(addDays(today, -daysAgo)),
+    close: price,
+    adjClose: price
+  });
+
   await db.insert(bets).values([
     {
       bettorA: "Alice",
@@ -19,7 +28,7 @@ async function main() {
       tickerB: "MSFT",
       startDate: start,
       endDate: end,
-      status: "open"
+      status: "OPEN"
     },
     {
       bettorA: "Charlie",
@@ -28,10 +37,24 @@ async function main() {
       tickerB: "AMZN",
       startDate: addDays(today, -30),
       endDate: addDays(today, -1),
-      status: "completed",
+      status: "SETTLED",
+      settledAt: today,
+      settlementTxId: randomUUID(),
       result: {
-        aReturn: 0.05,
-        bReturn: 0.02,
+        a: {
+          ticker: "GOOGL",
+          start: quoteSnapshot(100, 30),
+          end: quoteSnapshot(105, 1),
+          raw: 0.05,
+          rounded: 0.05
+        },
+        b: {
+          ticker: "AMZN",
+          start: quoteSnapshot(90, 30),
+          end: quoteSnapshot(92, 1),
+          raw: 0.0222,
+          rounded: 0.0222
+        },
         winner: "A"
       }
     }
